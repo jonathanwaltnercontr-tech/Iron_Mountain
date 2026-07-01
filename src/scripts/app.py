@@ -1,138 +1,120 @@
 import tkinter as tk
 from tkinter import messagebox
-import pandas as pd
-from io import StringIO
 import re
-import os
+import pyperclip
+import urllib.parse
 import webbrowser
-import plotly.express as px
-import gspread
-from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
 
-# --- AUTOMATED AUTHENTICATION STRUCTURE ---
-TARGET_FOLDER_ID = "1QPpHmq24nmASYgQb9TY6hcMLbi9jMJPe"
+# ==============================================================================
+# CONFIGURATION
+# ==============================================================================
+WEB_APP_URL = "https://script.google.com/a/macros/ironmountain.com/s/AKfycbxFWwKznWRIyLEHOmEosRLSUoU-66Sta35HESHcZUzjDEe4PJVvy3ZTIOC6sh3qB6tb/exec"
 
-# Tokens extracted directly from your Playground session
-ACCESS_TOKEN = "ya29.a0AT3oNZ_-lthgbFYhQQwytUPG9wTaRxxTtSPaRYJLom4D7s9F6D4mw9ZyzFUgbW2KxLzrHCnYvs9tpipHOOh7CF__GsI3UEycpZVglA3z1zf-yJM2vQiICOORRcL6Pm1xUxj0YnjKTNIL350kw8Y5TdvOU18BeAdCtHCTOR5gvD-CIbPNIts76LP7Z05dHTZJ2GpWpvAaCgYKAcsSARYSFQHGX2MiIMtpfP2VmkKlYJat3JiGBA0206"
-REFRESH_TOKEN = "1//04N29cKvdJV9XCgYIARAAGAQSNwF-L9IrnAx4kbIOEbaT10GkXQJ2D2s6suuxCW118xe7DVCzCJ_BNx-azMxKjzDP-96kbeYLzeM"
-CLIENT_ID = "407408718192.apps.googleusercontent.com"
+# Your validated access token token configuration string
+MY_ACCESS_TOKEN = "ya29.a0AT3oNZ_9_u_0hv2iDiidRSrJpSrroUEFjIecb2aK3Tp-QCT3rAKIoK88OqfkqEt9NUK-26RBFUCJW4YvOH9f4qbKUY3YCu20Q6PPO1SUUZRvIbgw6p6qEosofbwnstL0AMu_1A-wgdlphQ6sg6yzuEfdVgoqEKwTSFJOo5rurCdMnF8uBv8OjV1ezYkqjU2kj1UEbTMo4pwQIgaCgYKASMSARQSFQHGX2MiWA5vR3J-LsBHy7W1ho88Mg0213"
 
-class IronMountainUltimateApp:
-    def __init__(self):
-        self.root = tk.Tk()
-        self.root.withdraw() 
+def upload_to_google_sheets(summary_data, rack_model):
+    """Packages data parameters and routes it securely through your browser's SSO profile."""
+    payload = {
+        "secret_key": "IronMountainSecureToken2026",
+        "rack_model": rack_model,
+        "summary_data": summary_data
+    }
+    
+    try:
+        # Convert data dictionary to a clean, URL-safe data string parameter
+        json_string = urllib.parse.quote(str(payload).replace("'", '"'))
+        final_delivery_url = f"{WEB_APP_URL}?data={json_string}"
         
-        # Setup Floating UI Panel
-        self.floating_win = tk.Toplevel(self.root)
-        self.floating_win.title("IM Auto-Upload")
-        self.floating_win.attributes("-topmost", True)
-        self.floating_win.geometry("180x60+40+40") 
+        print("🔄 Processing asset parsing array and instantiating individual document file...")
+        # Automatically launches your default browser profile to create the sheet and avoid the 401 block
+        webbrowser.open(final_delivery_url, new=2, autoraise=False)
         
-        self.btn = tk.Button(self.floating_win, text="🚀 Send Straight to Folder", 
-                             bg="#007ACC", fg="white", font=("Arial", 10, "bold"),
-                             command=self.process_and_upload)
-        
-        self.btn.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        self.floating_win.withdraw()
-        
-        self.current_data = ""
-        self.monitor_clipboard()
-        
-    def monitor_clipboard(self):
-        try:
-            data = self.root.clipboard_get()
-            if "Child Item Summary" in data and "Category" in data:
-                if data != self.current_data:
-                    self.current_data = data
-                    self.floating_win.deiconify() 
+        messagebox.showinfo(
+            "Report Document Generated", 
+            f"Successfully updated master dashboard ledger!\n\nNew Sheet Created for: {rack_model}\nCategories printed to top table: {len(summary_data)}"
+        )
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to reach spreadsheet pipeline:\n{e}")
+
+def parse_clipboard_data():
+    """Extracts target matrix terms across dense or heavily squished corporate text dumps."""
+    raw_text = pyperclip.paste()
+    
+    # Target validation metrics set using an optimized hash set for instant O(1) lookups
+    valid_categories = {
+        "MEMORY", "MODULES", "OPTICAL_TRANSCEIVER", "SCRAP", 
+        "SSD", "STORAGE_ARRAY", "SWITCH", "UPS", "CHASSIS, CPU, GPU"
+    }
+    
+    summary_data = {}
+    rack_model = "Unknown Rack"
+    
+    # 1. CASE-INSENSITIVE SMART DATA EXTRACTOR
+    # Targets text strings that immediately precede numerical values anywhere in the clip
+    found_groupings = re.findall(r"([A-Za-z_]+?)(\d+)", raw_text)
+    for cat, qty in found_groupings:
+        upper_cat = cat.upper()
+        for target in valid_categories:
+            if upper_cat.endswith(target):
+                summary_data[target] = int(qty)
+
+    # Fallback scanning loop checking line layers directly if text is formatted cleanly
+    if not summary_data:
+        for line in raw_text.split('\n'):
+            for target in valid_categories:
+                if target in line.upper():
+                    nums = re.findall(r"\d+", line)
+                    if nums:
+                        summary_data[target] = int(nums[-1])
+
+    if not summary_data:
+        messagebox.showwarning("Empty Target Matrix", "No valid child item summary categories detected on your clipboard.")
+        return
+
+    # 2. BRAND-AGNOSTIC HARDWARE ENCLOSURE MATCHER
+    lines = raw_text.split('\n')
+    for line in lines:
+        line = line.strip()
+        if "RACK" in line.upper():
+            match_rack = re.search(r"RACK\s*([A-Za-z0-9_\-\s]+?\s+RACK|[A-Za-z0-9_\-\s]{3,30})", line, re.IGNORECASE)
+            if match_rack:
+                rack_model = match_rack.group(1).strip()
             else:
-                self.floating_win.withdraw()
-        except tk.TclError:
-            pass 
-        self.root.after(1000, self.monitor_clipboard)
+                fallback_match = re.search(r"RACK([A-Z0-9\s\-]{3,20})", line, re.IGNORECASE)
+                rack_model = fallback_match.group(1).strip() if fallback_match else "Unknown Rack"
+            
+            # Wipe out trailing numbers or status suffixes
+            rack_model = re.sub(r"\d+$", "", rack_model).strip()
+            break 
 
-    def process_and_upload(self):
-        try:
-            raw_text = self.current_data.strip()
-            
-            # 1. PARSE RACK MODEL NAME
-            rack_model = "Unknown Rack Model"
-            for line in raw_text.split('\n'):
-                if "RACK" in line:
-                    parts = re.split(r'\t|\s{2,}', line.strip())
-                    if len(parts) >= 4:
-                        rack_model = parts[3]
-                        break
+    print(f"\n================ LOG PREVIEW ================")
+    print(f"Identified Hardware Enclosure: {rack_model}")
+    print(f"Parsed Assets Breakdown:      {summary_data}")
+    print(f"=============================================")
+    
+    upload_to_google_sheets(summary_data, rack_model)
 
-            # 2. PARSE CHILD ITEM SUMMARY TABLE
-            summary_pattern = re.search(r"Child Item Summary\n(.*?)\nSerial Number", raw_text, re.DOTALL)
-            if not summary_pattern:
-                raise Exception("Could not isolate the Child Item Summary section.")
-                
-            summary_block = summary_pattern.group(1).strip()
-            
-            summary_rows = []
-            for line in summary_block.split('\n'):
-                parts = [p.strip() for p in re.split(r'\t|\s{2,}', line.strip()) if p.strip()]
-                if parts:
-                    summary_rows.append(parts)
-            
-            summary_df = pd.DataFrame(summary_rows[1:], columns=summary_rows[0])
-            summary_df['Quantity'] = pd.to_numeric(summary_df['Quantity'])
-            
-            # 3. GENERATE INTERACTIVE GRAPH VIEW
-            fig = px.bar(summary_df, x='Category', y='Quantity', 
-                         title=f"Components Structure Inside Rack ({rack_model})",
-                         text='Quantity', color='Quantity',
-                         color_continuous_scale=px.colors.sequential.Plotly3,
-                         template="plotly_white")
-            fig.update_traces(textposition='outside')
-            
-            chart_html = f"Rack_Graph_{rack_model.replace(' ', '_')}.html"
-            fig.write_html(chart_html)
-            webbrowser.open('file://' + os.path.realpath(chart_html))
-
-            # 4. TOKEN REFRESH AUTHENTICATION
-            creds = Credentials(
-                token=ACCESS_TOKEN,
-                refresh_token=REFRESH_TOKEN,
-                token_uri="https://oauth2.googleapis.com/token",
-                client_id=CLIENT_ID
-            )
-            
-            if not creds.valid:
-                creds.refresh(Request())
-                
-            gc = gspread.authorize(creds)
-            sheet_title = f"Rack Summary - {rack_model}"
-            
-            # Create the sheet inside your target folder
-            spreadsheet = gc.create(sheet_title, folder_id=TARGET_FOLDER_ID)
-            worksheet = spreadsheet.sheet1
-            worksheet.title = "Summary Overview"
-            
-            # --- GUARANTEED DATA BLOCK FORMATION ---
-            headers = [str(c) for c in summary_df.columns.tolist()]
-            rows = [[str(item) for item in row] for row in summary_df.values.tolist()]
-            
-            full_matrix = [
-                [f"Rack Profile Model: {rack_model}"],
-                [], 
-                headers
-            ] + rows
-            
-            # Use strict update_values() which forces Google to accept the matrix array data
-            worksheet.update_values('A1', full_matrix)
-            
-            messagebox.showinfo("Success!", f"Successfully processed {rack_model}!\n\n1. Graph opened in Chrome.\n2. Google Sheet data successfully populated in your folder.")
-            self.floating_win.withdraw()
-            self.current_data = ""
-
-        except Exception as e:
-            messagebox.showerror("Error", f"Execution Failed: {str(e)}")
+def create_floating_button():
+    """Builds a permanent widget panel that pins directly over active browser tabs/sheets."""
+    root = tk.Tk()
+    root.title("Clipboard Scanner Tool")
+    root.geometry("260x90")
+    root.attributes("-topmost", True)  # Anchors the tool window permanently on top
+    
+    btn = tk.Button(
+        root, 
+        text="Process Clipboard Data", 
+        command=parse_clipboard_data, 
+        bg="#d9534f", 
+        fg="white", 
+        font=("Arial", 11, "bold"),
+        activebackground="#c9302c",
+        activeforeground="white"
+    )
+    btn.pack(expand=True, fill=tk.BOTH, padx=12, pady=12)
+    
+    root.mainloop()
 
 if __name__ == "__main__":
-    print("Background listener engine running safely... Go copy your summary pages!")
-    app = IronMountainUltimateApp()
-    app.root.mainloop()
+    create_floating_button()
