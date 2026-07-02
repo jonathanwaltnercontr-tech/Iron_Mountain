@@ -4,26 +4,34 @@ import re
 import pyperclip
 import urllib.parse
 import webbrowser
+import json
+import os
+from dotenv import load_dotenv
 
 # ==============================================================================
 # CONFIGURATION
 # ==============================================================================
-WEB_APP_URL = "https://script.google.com/a/macros/ironmountain.com/s/AKfycbxFWwKznWRIyLEHOmEosRLSUoU-66Sta35HESHcZUzjDEe4PJVvy3ZTIOC6sh3qB6tb/exec"
+load_dotenv()
 
-# Your validated access token token configuration string
-MY_ACCESS_TOKEN = "ya29.a0AT3oNZ_9_u_0hv2iDiidRSrJpSrroUEFjIecb2aK3Tp-QCT3rAKIoK88OqfkqEt9NUK-26RBFUCJW4YvOH9f4qbKUY3YCu20Q6PPO1SUUZRvIbgw6p6qEosofbwnstL0AMu_1A-wgdlphQ6sg6yzuEfdVgoqEKwTSFJOo5rurCdMnF8uBv8OjV1ezYkqjU2kj1UEbTMo4pwQIgaCgYKASMSARQSFQHGX2MiWA5vR3J-LsBHy7W1ho88Mg0213"
+WEB_APP_URL = os.getenv(
+    "WEB_APP_URL", 
+    "https://script.google.com/a/macros/ironmountain.com/s/AKfycbxFWwKznWRIyLEHOmEosRLSUoU-66Sta35HESHcZUzjDEe4PJVvy3ZTIOC6sh3qB6tb/exec"
+)
+
+MY_ACCESS_TOKEN = os.getenv("MY_ACCESS_TOKEN", "")
+SECRET_KEY = os.getenv("SECRET_KEY", "IronMountainSecureToken2026")
 
 def upload_to_google_sheets(summary_data, rack_model):
     """Packages data parameters and routes it securely through your browser's SSO profile."""
     payload = {
-        "secret_key": "IronMountainSecureToken2026",
+        "secret_key": SECRET_KEY,
         "rack_model": rack_model,
         "summary_data": summary_data
     }
     
     try:
-        # Convert data dictionary to a clean, URL-safe data string parameter
-        json_string = urllib.parse.quote(str(payload).replace("'", '"'))
+        # Convert data dictionary to a clean, URL-safe JSON string
+        json_string = urllib.parse.quote(json.dumps(payload))
         final_delivery_url = f"{WEB_APP_URL}?data={json_string}"
         
         print("🔄 Processing asset parsing array and instantiating individual document file...")
@@ -38,29 +46,50 @@ def upload_to_google_sheets(summary_data, rack_model):
         messagebox.showerror("Error", f"Failed to reach spreadsheet pipeline:\n{e}")
 
 def parse_clipboard_data():
-    """Extracts target matrix terms across dense or heavily squished corporate text dumps."""
-    raw_text = pyperclip.paste()
+    """Extracts target matrix terms strictly from the Child Item Summary block 
+    and captures ONLY the exact Rack model from the itemized table layout."""
+    try:
+        raw_text = pyperclip.paste()
+    except Exception as e:
+        messagebox.showerror("Clipboard Error", f"Failed to read clipboard:\n{e}")
+        return
     
-    # Target validation metrics set using an optimized hash set for instant O(1) lookups
-    valid_categories = {
-        "MEMORY", "MODULES", "OPTICAL_TRANSCEIVER", "SCRAP", 
-        "SSD", "STORAGE_ARRAY", "SWITCH", "UPS", "CHASSIS, CPU, GPU"
-    }
+    if not raw_text or not raw_text.strip():
+        messagebox.showwarning("Empty Clipboard", "Clipboard is empty. Please copy data first.")
+        return
     
     summary_data = {}
     rack_model = "Unknown Rack"
     
-    # 1. CASE-INSENSITIVE SMART DATA EXTRACTOR
-    # Targets text strings that immediately precede numerical values anywhere in the clip
-    found_groupings = re.findall(r"([A-Za-z_]+?)(\d+)", raw_text)
-    for cat, qty in found_groupings:
-        upper_cat = cat.upper()
+    # 1. ISOLATE THE CHILD ITEM SUMMARY SECTION
+    summary_section_match = re.search(r"Child Item Summary(.*?)(?:Serial Number|$)", raw_text, re.IGNORECASE | re.DOTALL)
+    
+    if summary_section_match:
+        summary_block = summary_section_match.group(1)
+        valid_categories = {
+            "CHASSIS", "HBA", "MEMORY", "MODULES", "SSD", "SWITCH", "UPS", "SCRAP",
+            "CPU", "CPU_COOLER", "FAN", "POWER_SUPPLY", "PDU", "NIC", "RAID_CONTROLLER",
+            "STORAGE_DRIVE", "HDD", "NVME", "GPU", "TPU", "FPGA", "KVM", "BATTERY",
+            "BATTERY_MODULE", "CONTROLLER", "NETWORK_SWITCH", "TRANSCEIVER", "SFP", "QSFP",
+            "CABLES", "RAILS", "MOUNTING_KIT", "FAN_MODULE", "BLADE", "BLADE_SERVER",
+            "RACK_UNIT", "PATCH_PANEL", "BMC", "MANAGEMENT_MODULE", "CONSOLE_SERVER",
+            "TAPE_LIBRARY", "TAPE_LIB", "JBOD", "EXPANSION_CARD", "OPTICAL_TRANSCEIVER"
+        }
+        
         for target in valid_categories:
-            if upper_cat.endswith(target):
-                summary_data[target] = int(qty)
-
-    # Fallback scanning loop checking line layers directly if text is formatted cleanly
+            cat_match = re.search(rf"{target}\s*(\d+)\s*(\d*)", summary_block, re.IGNORECASE)
+            if cat_match:
+                # Use group(2) if it exists and is not empty, otherwise use group(1)
+                qty_str = cat_match.group(2) if cat_match.group(2) else cat_match.group(1)
+                summary_data[target] = int(qty_str)
+                
     if not summary_data:
+        valid_categories = {
+            "MEMORY", "MODULES", "OPTICAL_TRANSCEIVER", "SCRAP", "SSD", "STORAGE_ARRAY",
+            "SWITCH", "UPS", "CHASSIS", "CPU", "FAN", "POWER_SUPPLY", "PDU", "NIC",
+            "RAID_CONTROLLER", "HDD", "NVME", "GPU", "BLADE", "PATCH_PANEL", "CABLES",
+            "TRANSCEIVER", "SFP", "QSFP", "JBOD", "EXPANSION_CARD"
+        }
         for line in raw_text.split('\n'):
             for target in valid_categories:
                 if target in line.upper():
@@ -72,21 +101,25 @@ def parse_clipboard_data():
         messagebox.showwarning("Empty Target Matrix", "No valid child item summary categories detected on your clipboard.")
         return
 
-    # 2. BRAND-AGNOSTIC HARDWARE ENCLOSURE MATCHER
-    lines = raw_text.split('\n')
-    for line in lines:
-        line = line.strip()
-        if "RACK" in line.upper():
-            match_rack = re.search(r"RACK\s*([A-Za-z0-9_\-\s]+?\s+RACK|[A-Za-z0-9_\-\s]{3,30})", line, re.IGNORECASE)
-            if match_rack:
-                rack_model = match_rack.group(1).strip()
-            else:
-                fallback_match = re.search(r"RACK([A-Z0-9\s\-]{3,20})", line, re.IGNORECASE)
-                rack_model = fallback_match.group(1).strip() if fallback_match else "Unknown Rack"
+    # 2. EXACT MODEL EXTRACTOR FROM THE ITEMIZED GRAPH
+    # Strategy A: Clean column-based extraction using tabs or spaces
+    for line in raw_text.split('\n'):
+        # Split by tabs first, then fall back to multi-spaces
+        columns = [col.strip() for col in line.split('\t') if col.strip()]
+        if len(columns) < 3:
+            columns = [col.strip() for col in re.split(r'\s{2,}', line) if col.strip()]
             
-            # Wipe out trailing numbers or status suffixes
-            rack_model = re.sub(r"\d+$", "", rack_model).strip()
-            break 
+        # If 'RACK' is found in the Category column, the next column is explicitly the Model
+        if len(columns) >= 4 and "RACK" == columns[2].upper():
+            rack_model = columns[3]
+            break
+
+    # Strategy B: Fallback if the string arrives completely squished without any spacing
+    if rack_model == "Unknown Rack":
+        # Finds 'RACK', captures the model characters, ignores the 7-digit Asset Tag right before the Status
+        squished_match = re.search(r"RACK\s*([A-Za-z0-9_\-]+?)(\d{7})(?:SOLD|RECYCLED|DESTROYED|INVENTORY)", raw_text, re.IGNORECASE)
+        if squished_match:
+            rack_model = squished_match.group(1).strip()
 
     print(f"\n================ LOG PREVIEW ================")
     print(f"Identified Hardware Enclosure: {rack_model}")
