@@ -61,35 +61,79 @@ def parse_clipboard_data():
     summary_data = {}
     rack_model = "Unknown Rack"
     
+    valid_categories = {
+        "CHASSIS", "HBA", "MEMORY", "MODULES", "SSD", "SWITCH", "UPS", "SCRAP",
+        "CPU", "CPU_COOLER", "FAN", "POWER_SUPPLY", "PDU", "NIC", "RAID_CONTROLLER",
+        "STORAGE_DRIVE", "HDD", "NVME", "GPU", "TPU", "FPGA", "KVM", "BATTERY",
+        "BATTERY_MODULE", "CONTROLLER", "NETWORK_SWITCH", "TRANSCEIVER", "SFP", "QSFP",
+        "CABLES", "RAILS", "MOUNTING_KIT", "FAN_MODULE", "BLADE", "BLADE_SERVER",
+        "RACK_UNIT", "PATCH_PANEL", "BMC", "MANAGEMENT_MODULE", "CONSOLE_SERVER",
+        "TAPE_LIBRARY", "TAPE_LIB", "JBOD", "EXPANSION_CARD", "OPTICAL_TRANSCEIVER",
+        "POWER_STRIPS", "SERVER", "STORAGE_ARRAY"  # Added missing categories
+    }
+    
+    def parse_quantity(digit_string):
+        """Extract quantity from digit string.
+        
+        Assumes format: <ITEMS><QUANTITY>
+        Where ITEMS is 1-2 digits, QUANTITY is the rest.
+        """
+        if len(digit_string) <= 2:
+            # For 1-2 digits: split in half (or just 1 digit for quantity if len=1)
+            split = len(digit_string) // 2
+            if split == 0:
+                return int(digit_string)
+            else:
+                return int(digit_string[split:])
+        else:
+            # For 3+ digits: items get 2 digits max, rest is quantity
+            split = min(2, (len(digit_string) + 1) // 2)
+            return int(digit_string[split:])
+    
     # 1. ISOLATE THE CHILD ITEM SUMMARY SECTION
     summary_section_match = re.search(r"Child Item Summary(.*?)(?:Serial Number|$)", raw_text, re.IGNORECASE | re.DOTALL)
     
     if summary_section_match:
         summary_block = summary_section_match.group(1)
-        valid_categories = {
-            "CHASSIS", "HBA", "MEMORY", "MODULES", "SSD", "SWITCH", "UPS", "SCRAP",
-            "CPU", "CPU_COOLER", "FAN", "POWER_SUPPLY", "PDU", "NIC", "RAID_CONTROLLER",
-            "STORAGE_DRIVE", "HDD", "NVME", "GPU", "TPU", "FPGA", "KVM", "BATTERY",
-            "BATTERY_MODULE", "CONTROLLER", "NETWORK_SWITCH", "TRANSCEIVER", "SFP", "QSFP",
-            "CABLES", "RAILS", "MOUNTING_KIT", "FAN_MODULE", "BLADE", "BLADE_SERVER",
-            "RACK_UNIT", "PATCH_PANEL", "BMC", "MANAGEMENT_MODULE", "CONSOLE_SERVER",
-            "TAPE_LIBRARY", "TAPE_LIB", "JBOD", "EXPANSION_CARD", "OPTICAL_TRANSCEIVER"
-        }
         
+        # Try normal parsing first (with whitespace)
+        found_with_whitespace = False
         for target in valid_categories:
-            cat_match = re.search(rf"{target}\s*(\d+)\s*(\d*)", summary_block, re.IGNORECASE)
+            cat_match = re.search(rf"{target}\s+(\d+)\s+(\d+)", summary_block, re.IGNORECASE)
             if cat_match:
-                # Use group(2) if it exists and is not empty, otherwise use group(1)
-                qty_str = cat_match.group(2) if cat_match.group(2) else cat_match.group(1)
+                qty_str = cat_match.group(2)
                 summary_data[target] = int(qty_str)
+                found_with_whitespace = True
+        
+        # If no matches with whitespace, try squished format parsing
+        if not found_with_whitespace:
+            # Find all category positions
+            category_positions = []
+            for cat in valid_categories:
+                for match in re.finditer(cat, summary_block, re.IGNORECASE):
+                    category_positions.append((match.start(), match.end(), cat))
+            
+            # Sort by start position
+            category_positions.sort()
+            
+            # Parse data between categories
+            for i, (start, end, cat) in enumerate(category_positions):
+                data_start = end
+                if i + 1 < len(category_positions):
+                    data_end = category_positions[i+1][0]
+                else:
+                    data_end = len(summary_block)
                 
+                data_range = summary_block[data_start:data_end]
+                all_numbers = re.findall(r"\d+", data_range)
+                
+                if all_numbers:
+                    digit_string = all_numbers[0]
+                    qty = parse_quantity(digit_string)
+                    summary_data[cat] = qty
+    
+    # Fallback: Line-by-line parsing if summary still empty
     if not summary_data:
-        valid_categories = {
-            "MEMORY", "MODULES", "OPTICAL_TRANSCEIVER", "SCRAP", "SSD", "STORAGE_ARRAY",
-            "SWITCH", "UPS", "CHASSIS", "CPU", "FAN", "POWER_SUPPLY", "PDU", "NIC",
-            "RAID_CONTROLLER", "HDD", "NVME", "GPU", "BLADE", "PATCH_PANEL", "CABLES",
-            "TRANSCEIVER", "SFP", "QSFP", "JBOD", "EXPANSION_CARD"
-        }
         for line in raw_text.split('\n'):
             for target in valid_categories:
                 if target in line.upper():
@@ -102,21 +146,18 @@ def parse_clipboard_data():
         return
 
     # 2. EXACT MODEL EXTRACTOR FROM THE ITEMIZED GRAPH
-    # Strategy A: Clean column-based extraction using tabs or spaces
+    # Strategy A: Column-based extraction
     for line in raw_text.split('\n'):
-        # Split by tabs first, then fall back to multi-spaces
         columns = [col.strip() for col in line.split('\t') if col.strip()]
         if len(columns) < 3:
             columns = [col.strip() for col in re.split(r'\s{2,}', line) if col.strip()]
             
-        # If 'RACK' is found in the Category column, the next column is explicitly the Model
         if len(columns) >= 4 and "RACK" == columns[2].upper():
             rack_model = columns[3]
             break
 
-    # Strategy B: Fallback if the string arrives completely squished without any spacing
+    # Strategy B: Fallback for squished data
     if rack_model == "Unknown Rack":
-        # Finds 'RACK', captures the model characters, ignores the 7-digit Asset Tag right before the Status
         squished_match = re.search(r"RACK\s*([A-Za-z0-9_\-]+?)(\d{7})(?:SOLD|RECYCLED|DESTROYED|INVENTORY)", raw_text, re.IGNORECASE)
         if squished_match:
             rack_model = squished_match.group(1).strip()
